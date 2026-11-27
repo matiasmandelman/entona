@@ -207,6 +207,7 @@ nav{display:grid;grid-template-columns:repeat(5,1fr);border-top:1px solid var(--
     <section class="view" id="v-cancion" hidden>
       <h2>Modo canción</h2>
       <p class="sub">Carga una canción de tu móvil, ralentízala, repite un trozo y grábate encima. Usa auriculares.</p>
+      <div class="banner" id="sPhoneWarn" hidden style="border-color:var(--warn);background:color-mix(in srgb,var(--warn) 14%,var(--surface))">🎧 Aquí suena la música y te escucha a la vez, y el móvil manda el sonido al auricular de llamadas. <b>Conecta auriculares</b> (con cable o bluetooth) y sonará bien.</div>
       <div class="row">
         <label class="btn file grow" for="sFile">🎵 Elegir canción<input type="file" id="sFile" accept="audio/*"></label>
         <label class="btn file" for="sGuide">Guía .json<input type="file" id="sGuide" accept=".json,application/json"></label>
@@ -310,6 +311,7 @@ async function startMic(){
   if(micStream) { ensureCtx(); return true; }
   if(!navigator.mediaDevices||!navigator.mediaDevices.getUserMedia){ $('secureWarn').hidden=false; setMic('err','Sin micrófono'); return false; }
   try{
+    setSession('play-and-record');
     ensureCtx();
     micStream=await navigator.mediaDevices.getUserMedia({audio:{echoCancellation:false,noiseSuppression:false,autoGainControl:false}});
     const src=ctx.createMediaStreamSource(micStream);
@@ -324,6 +326,15 @@ async function startMic(){
     alertMsg('No pude usar el micrófono. Revisa el permiso del navegador para esta página.');
     return false;
   }
+}
+/* En móviles, con el micro abierto el sistema manda el sonido al auricular de llamadas.
+   Solución: soltar el micro mientras la app toca notas y volver a pedirlo para escucharte. */
+const speakerMode=navigator.maxTouchPoints>0;
+function setSession(type){ try{ if(navigator.audioSession) navigator.audioSession.type=type; }catch(e){} }
+setSession('playback');
+function stopMic(){
+  if(micStream){ micStream.getTracks().forEach(t=>t.stop()); micStream=null; analyser=null; }
+  pitch.midi=null; hist.length=0; setSession('playback'); setMic('','Micro en pausa');
 }
 function setMic(cls,txt){ const b=$('micBtn'); b.className='mic '+cls; $('micTxt').textContent=txt; }
 function alertMsg(t){ const v=document.querySelector('.view:not([hidden]) .big-msg'); if(v) v.textContent=t; else $('aStatus').textContent=t; }
@@ -425,7 +436,11 @@ function guideUI(){ $('gName').textContent=guide==null?'Apagada':noteName(guide)
 $('gUp').onclick=()=>{ guide=guide==null?Math.round(range?(range.lo+range.hi)/2:55):guide+1; guideUI(); };
 $('gDown').onclick=()=>{ guide=guide==null?Math.round(range?(range.lo+range.hi)/2:55):guide-1; guideUI(); };
 $('gName').ondblclick=()=>{guide=null;guideUI();};
-$('gPlay').onclick=async()=>{ await startMic(); if(guide==null){guide=Math.round(range?(range.lo+range.hi)/2:55);guideUI();} tone(guide,ctx.currentTime+.02,1.2); };
+$('gPlay').onclick=async()=>{
+  if(guide==null){guide=Math.round(range?(range.lo+range.hi)/2:55);guideUI();}
+  if(speakerMode){ stopMic(); ensureCtx(); tone(guide,ctx.currentTime+.15,1.2,.3); setTimeout(startMic,1500); }
+  else { await startMic(); tone(guide,ctx.currentTime+.02,1.2); }
+};
 function frameAfinar(now){
   const t=now/1000; aTrail.push({t,m:pitch.midi}); while(aTrail.length&&aTrail[0].t<t-8) aTrail.shift();
   const dot=$('aDot');
@@ -468,7 +483,7 @@ function pattern(){
   const base=rnd(Math.min(lo-mn,hi-mx),Math.max(lo-mn,hi-mx)); return p.map(x=>x+base);
 }
 function chipsUI(){ $('iTargets').innerHTML=ex.targets.map((m,i)=>'<div class="chip'+(i<ex.idx?' done':i===ex.idx&&ex.phase==='sing'?' now':'')+'">'+noteName(m)+'</div>').join(''); }
-function playTargets(){ stopTones(); const t=ctx.currentTime+.08; ex.targets.forEach((m,i)=>tone(m,t+i*.75,.68)); ex.phase='listen'; ex.listenUntil=performance.now()+ex.targets.length*750+250; $('iMsg').textContent='Escucha…'; $('iMsg').className='big-msg'; }
+function playTargets(){ stopTones(); if(speakerMode) stopMic(); ensureCtx(); const t=ctx.currentTime+.15; ex.targets.forEach((m,i)=>tone(m,t+i*.75,.68,speakerMode?.3:.16)); ex.phase='listen'; ex.listenUntil=performance.now()+ex.targets.length*750+250; $('iMsg').textContent='Escucha…'; $('iMsg').className='big-msg'; }
 async function newRound(){ if(!await startMic()) return; ex.targets=pattern(); ex.idx=0; ex.held=0; ex.offs=[]; chipsUI(); playTargets(); $('iRepeat').disabled=false; $('iStart').textContent='Otra'; }
 $('iStart').onclick=newRound;
 $('iRepeat').onclick=async()=>{ if(!ex.targets.length||!await startMic()) return; ex.idx=0; ex.held=0; chipsUI(); playTargets(); };
@@ -483,7 +498,8 @@ function finish(ok){
 }
 function frameImitar(now,dt){
   const t=now/1000; iTrail.push({t,m:ex.phase==='sing'?pitch.midi:null}); while(iTrail.length&&iTrail[0].t<t-6) iTrail.shift();
-  if(ex.phase==='listen'&&now>ex.listenUntil){ ex.phase='sing'; ex.deadline=now+(ex.targets.length===1?6000:11000); $('iMsg').textContent='Ahora tú: '+(ex.targets.length===1?'mantén la nota':'nota por nota'); chipsUI(); hist.length=0; }
+  if(ex.phase==='listen'&&now>ex.listenUntil&&!micStream){ ex.phase='arming'; startMic().then(ok=>{ if(ex.phase==='arming'){ ex.phase='listen'; if(!ok) ex.phase='idle'; } }); }
+  if(ex.phase==='listen'&&now>ex.listenUntil&&micStream){ ex.phase='sing'; ex.deadline=now+(ex.targets.length===1?6000:11000); $('iMsg').textContent='Ahora tú: '+(ex.targets.length===1?'mantén la nota':'nota por nota'); chipsUI(); hist.length=0; }
   if(ex.phase==='sing'){
     const tg=ex.targets[ex.idx];
     if(pitch.midi!=null){
@@ -639,6 +655,7 @@ function loop(now){
   if(view==='cancion'||song.playing) frameCancion(now,dt);
   requestAnimationFrame(loop);
 }
+if(speakerMode) $('sPhoneWarn').hidden=false;
 playUI(); requestAnimationFrame(loop);
 if(!window.isSecureContext) $('secureWarn').hidden=false;
 </script>

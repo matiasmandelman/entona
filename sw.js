@@ -1,5 +1,5 @@
 // Entona: funciona sin conexión. Siempre intenta la red primero para que las actualizaciones lleguen enseguida.
-const CACHE = 'entona-v3';
+const CACHE = 'entona-v4';
 const FILES = ['./', './index.html', './manifest.webmanifest', './icon.svg', './icon-180.png', './icon-512.png'];
 
 self.addEventListener('install', e => {

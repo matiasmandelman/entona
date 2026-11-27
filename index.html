@@ -253,6 +253,10 @@ nav{display:grid;grid-template-columns:repeat(5,1fr);border-top:1px solid var(--
         <button class="btn grow" id="sRec" type="button">● Grabarme</button>
         <button class="btn grow" id="sTake" type="button" disabled>▶ Escuchar mi toma</button>
       </div>
+      <div class="card" id="learnBox" hidden style="display:flex;flex-direction:column;gap:10px">
+        <p class="note-tip" id="learnTxt" style="color:var(--fg)"></p>
+        <div class="row"><button class="btn primary grow" id="learnBtn" type="button">🎓 Aprender barras</button><button class="btn small" id="learnDel" type="button" hidden>Borrar barras</button></div>
+      </div>
       <p class="note-tip" id="sHelp"></p>
 
       <h2 style="margin-top:10px">Elige qué cantar</h2>
@@ -352,6 +356,7 @@ $('warnOk').onclick=()=>{ warnClosed=true; outUI(); };
 $('outBtn').onclick=()=>{ outMode=speakerMode()?'phones':'speaker'; store.set('out',outMode); outUI(); };
 
 /* ================= audio y detección de tono ================= */
+let micSrc=null;
 let ctx=null, analyser=null, micStream=null, tbuf=null, yinD=null, wakeLock=null, micPending=null;
 const pitch={midi:null,freq:0,level:0};
 const hist=[];
@@ -368,9 +373,9 @@ async function startMic(){
       setSession('play-and-record');
       ensureCtx();
       micStream=await navigator.mediaDevices.getUserMedia({audio:{echoCancellation:false,noiseSuppression:false,autoGainControl:false}});
-      const src=ctx.createMediaStreamSource(micStream);
+      micSrc=ctx.createMediaStreamSource(micStream);
       analyser=ctx.createAnalyser(); analyser.fftSize=2048;
-      src.connect(analyser);
+      micSrc.connect(analyser);
       tbuf=new Float32Array(analyser.fftSize);
       setMic('on','Micro activo');
       try{ wakeLock=await navigator.wakeLock?.request('screen'); }catch(e){}
@@ -383,7 +388,7 @@ async function startMic(){
   return micPending;
 }
 function stopMic(){
-  if(micStream){ micStream.getTracks().forEach(t=>t.stop()); micStream=null; analyser=null; }
+  if(micStream){ micStream.getTracks().forEach(t=>t.stop()); micStream=null; analyser=null; micSrc=null; }
   pitch.midi=null; hist.length=0; setSession('playback'); setMic('','Micro en pausa');
 }
 $('micBtn').onclick=()=>{ if(micStream) return; startMic(); };
@@ -668,7 +673,7 @@ function loadYT(){
 }
 async function openYT(id,title,sub){
   stopAll(); resetSongState();
-  S.kind='yt'; S.id=id; S.title=title; S.guide=null;
+  S.kind='yt'; S.id=id; S.title=title; S.guide=guides[id]?toNotes(guides[id]):null;
   $('ytWrap').hidden=false; songHeader(title,sub||'Video oficial en YouTube');
   markCurrent(); playUI();
   const ok=await loadYT();
@@ -734,10 +739,11 @@ function pause(){
   else stopTones();
   S.playing=false;
   if(S.rec&&S.rec.state==='recording') stopRec();
+  stopLearn();
   playUI();
 }
-function stopAll(){ if(S.playing) pause(); if(S.rec&&S.rec.state==='recording') stopRec(); if(takeAudio){ takeAudio.pause(); takeAudio=null; } }
-function onEnded(){ S.playing=false; if(S.rec&&S.rec.state==='recording') stopRec(); playUI(); }
+function stopAll(){ if(S.playing) pause(); stopLearn(); if(S.rec&&S.rec.state==='recording') stopRec(); if(takeAudio){ takeAudio.pause(); takeAudio=null; } }
+function onEnded(){ S.playing=false; if(S.rec&&S.rec.state==='recording') stopRec(); stopLearn(); playUI(); }
 S.audio.onended=()=>{ if(S.kind==='file') onEnded(); };
 function resetSongState(){ S.trail=[]; S.a=S.b=null; S.lastT=0; S.hit=S.tot=S.steady=S.voiced=0; loopUI(); if(S.takeUrl){ URL.revokeObjectURL(S.takeUrl); S.takeUrl=null; } $('sTake').disabled=true; }
 function songHeader(t,sub){ $('sTitle').textContent=t; $('sSub').textContent=sub; }
@@ -749,7 +755,10 @@ function playUI(){
   $('sHelp').textContent=S.kind==='warm'
     ?'Canta encima de cada barra naranja con "la la la". Si te queda alto, canta una octava abajo: también vale.'
     :S.guide?'Pisa las barras naranjas con tu voz. Una octava arriba o abajo también cuenta.'
+    :S.kind==='yt'?'Primero toca «Aprender barras» (abajo) para que aparezcan las notas de esta canción.'
     :'La línea amarilla es tu voz. «Voz firme» mide cuánto rato sostienes notas limpias, sin temblar ni deslizar. Marca A y B para repetir un estribillo.';
+  if(L.on){ $('sSpeed').disabled=true; $('sScoreLbl').textContent='Aprendiendo'; $('sHelp').textContent='Las barras naranjas son lo que la app va oyendo del cantante.'; }
+  learnUI();
 }
 $('sPlay').onclick=()=>{ if(S.playing) pause(); else play(); };
 $('sBack').onclick=()=>seek(songTime()-5);
@@ -794,7 +803,7 @@ function restoreVol(){ S.audio.volume=1; if(yt&&ytReady) try{yt.setVolume(100)}c
 function songRow(id,title,sub,removable){
   return '<button class="song" type="button" data-id="'+esc(id)+'" data-title="'+esc(title)+'" data-sub="'+esc(sub||'')+'">'+
     '<img src="https://i.ytimg.com/vi/'+encodeURIComponent(id)+'/mqdefault.jpg" alt="" loading="lazy">'+
-    '<div><b>'+esc(title)+'</b><small>'+esc(sub||'')+'</small></div>'+(removable?'<span class="x" role="button" aria-label="Quitar" data-del="'+esc(id)+'">×</span>':'')+'</button>';
+    '<div><b>'+esc(title)+'</b><small>'+(guides[id]?'<span class="ok">✓ con barras</span> · ':'')+esc(sub||'')+'</small></div>'+(removable?'<span class="x" role="button" aria-label="Quitar" data-del="'+esc(id)+'">×</span>':'')+'</button>';
 }
 function renderCatalog(){
   let h='<div class="label artist">Para empezar</div><div class="songs">'+
@@ -875,12 +884,16 @@ async function autoGuide(file,onProg){
     if(i%1500===0){ onProg(i/frames); await new Promise(r=>setTimeout(r,0)); }
   }
   onProg(1);
+  return framesToNotes(mids,HOP/SR,0);
+}
+/* tonos cada dt segundos (null = sin voz) → notas {s,e,m} */
+function framesToNotes(mids,dt,t0){
   // suavizado (mediana de 5)
   const sm=mids.map((v,i)=>{ if(v==null) return null; const w=[]; for(let k=i-2;k<=i+2;k++) if(mids[k]!=null) w.push(mids[k]); return w.length>=3?median(w):null; });
-  const dt=HOP/SR, notes=[]; let cur=null;
+  const notes=[]; let cur=null;
   const close=()=>{ if(cur&&cur.e-cur.s>=0.12) notes.push({s:cur.s,e:cur.e,m:Math.round(median(cur.v))}); cur=null; };
   for(let i=0;i<sm.length;i++){
-    const v=sm[i], t=i*dt;
+    const v=sm[i], t=t0+i*dt;
     if(v==null){ close(); continue; }
     if(cur&&Math.abs(v-cur.ref)<0.7){ cur.v.push(v); cur.e=t+dt; cur.ref=cur.ref*.85+v*.15; }
     else { close(); cur={s:t,e:t+dt,v:[v],ref:v}; }
@@ -896,6 +909,88 @@ async function autoGuide(file,onProg){
   return out;
 }
 
+/* ---- aprender barras de un video de YouTube escuchando por el micro ---- */
+/* YouTube no deja leer el audio del video, así que la app lo escucha: suena por el altavoz,
+   el micro lo capta, se filtran graves y agudos y se apunta el tono de la voz principal cada 20 ms. */
+const BUCKET=0.02;
+let guides=store.get('guides',{});            // id de video → [[s,e,m],...]
+const L={on:false,buckets:null,chain:null,src:null,buf:null,d:null,lv:[],lastBuild:0,sr:48000};
+const toNotes=a=>a.map(n=>({s:n[0],e:n[1],m:n[2]}));
+const fromNotes=a=>a.map(n=>[+n.s.toFixed(2),+n.e.toFixed(2),n.m]);
+function learnChain(){
+  if(L.chain&&L.src===micSrc) return L.chain;
+  const hp1=ctx.createBiquadFilter(); hp1.type='highpass'; hp1.frequency.value=120;
+  const hp2=ctx.createBiquadFilter(); hp2.type='highpass'; hp2.frequency.value=120;
+  const lp=ctx.createBiquadFilter(); lp.type='lowpass'; lp.frequency.value=1400;
+  const an=ctx.createAnalyser(); an.fftSize=2048;
+  micSrc.connect(hp1); hp1.connect(hp2); hp2.connect(lp); lp.connect(an);
+  L.src=micSrc; L.chain=an; L.buf=new Float32Array(2048); L.d=new Float32Array(1200); L.sr=ctx.sampleRate;
+  return an;
+}
+function notesToBuckets(notes){ const b=new Map(); (notes||[]).forEach(n=>{ for(let k=Math.round(n.s/BUCKET);k<=Math.round(n.e/BUCKET);k++) b.set(k,n.m); }); return b; }
+function bucketsToNotes(b){
+  if(!b.size) return [];
+  const keys=[...b.keys()]; const k0=Math.min(...keys), k1=Math.max(...keys);
+  const raw=new Array(k1-k0+1).fill(null); b.forEach((m,k)=>{ raw[k-k0]=m; });
+  // si el móvil va a pocos fotogramas por segundo quedan huecos de 1–3 casillas: se rellenan con la nota anterior
+  const mids=raw.slice(); let lastI=-99;
+  for(let i=0;i<raw.length;i++){
+    if(raw[i]!=null){ if(lastI>=0&&i-lastI>1&&i-lastI<=4&&Math.abs(raw[i]-raw[lastI])<1) for(let j=lastI+1;j<i;j++) mids[j]=raw[lastI]; lastI=i; }
+  }
+  return framesToNotes(mids,BUCKET,k0*BUCKET);
+}
+async function startLearn(){
+  if(S.kind!=='yt'||!yt||!ytReady){ learnUI('Espera a que cargue el video.'); return; }
+  stopAll();
+  if(!await startMic()){ learnUI('Necesito el micrófono para escuchar la canción.'); return; }
+  learnChain();
+  L.on=true; L.id=S.id; L.lv=[]; L.lastBuild=0;
+  L.buckets=notesToBuckets(S.guide);
+  $('sSpeed').value='1'; try{ yt.setPlaybackRate(1); yt.unMute(); yt.setVolume(100); }catch(e){}
+  if(S.a!=null) yt.seekTo(S.a,true);
+  yt.playVideo(); S.playing=true; playUI();
+}
+function stopLearn(save=true){
+  if(!L.on) return; L.on=false;
+  if(save&&L.id===S.id){
+    const notes=bucketsToNotes(L.buckets);
+    if(notes.length){ S.guide=notes; guides[S.id]=fromNotes(notes); store.set('guides',guides); renderCatalog(); }
+  }
+  L.buckets=null; playUI();
+}
+function learnFrame(t){
+  const an=L.chain; if(!an) return;
+  an.getFloatTimeDomainData(L.buf);
+  let s=0; for(let i=0;i<L.buf.length;i++) s+=L.buf[i]*L.buf[i];
+  const rms=Math.sqrt(s/L.buf.length);
+  L.lv.push(rms); if(L.lv.length>300) L.lv.shift();
+  const gate=Math.max(0.0015,median(L.lv)*0.5);
+  let m=null;
+  if(rms>gate){ const f=yin(L.buf,L.sr,1024,GUIDE_THR,L.d); if(f&&f>75&&f<900) m=f2m(f); }
+  if(m!=null) L.buckets.set(Math.round(t/BUCKET),m);
+  if(t-L.lastBuild>1.5||t<L.lastBuild){ L.lastBuild=t; S.guide=bucketsToNotes(L.buckets); }
+}
+function learnUI(msg){
+  const box=$('learnBox'); box.hidden=S.kind!=='yt';
+  if(box.hidden) return;
+  const n=S.guide?S.guide.length:0;
+  if(L.on){
+    $('learnTxt').innerHTML='<b>Escuchando la canción…</b> No cantes ahora. Sin auriculares, volumen alto y el móvil quieto. Las barras van apareciendo: puedes dejarla entera o parar cuando quieras.';
+    $('learnBtn').textContent='■ Terminar y guardar barras'; $('learnBtn').className='btn primary grow'; $('learnDel').hidden=true;
+  } else if(n){
+    $('learnTxt').innerHTML='<b>Barras listas</b> ('+n+' notas). Ahora ponte auriculares, toca 🔊 arriba para pasarlo a 🎧 y dale a reproducir. Si a un trozo le faltan barras, márcalo con A y B y vuelve a aprender solo ese trozo.';
+    $('learnBtn').textContent='🎓 Mejorar barras'; $('learnBtn').className='btn grow'; $('learnDel').hidden=false;
+  } else {
+    $('learnTxt').innerHTML='<b>Esta canción aún no tiene barras.</b> Toca «Aprender barras»: la canción suena por el altavoz y la app escucha al cantante para dibujar las notas. Hazlo una vez, sin auriculares y con volumen alto; luego quedan guardadas.';
+    $('learnBtn').textContent='🎓 Aprender barras'; $('learnBtn').className='btn primary grow'; $('learnDel').hidden=true;
+  }
+  if(msg) $('learnTxt').innerHTML+='<br><span class="badc">'+esc(msg)+'</span>';
+}
+$('learnBtn').onclick=()=>{ if(L.on){ pause(); } else startLearn(); };
+$('learnDel').onclick=()=>{ if($('learnDel').dataset.confirm!=='1'){ $('learnDel').dataset.confirm='1'; $('learnDel').textContent='¿Seguro? Toca otra vez'; setTimeout(()=>{ $('learnDel').dataset.confirm=''; $('learnDel').textContent='Borrar barras'; },3000); return; }
+  $('learnDel').dataset.confirm=''; $('learnDel').textContent='Borrar barras';
+  delete guides[S.id]; store.set('guides',guides); S.guide=null; renderCatalog(); playUI(); };
+
 /* ---- dibujo y puntuación ---- */
 const steadyWin=[];
 function frameCancion(now,dt){
@@ -904,14 +999,15 @@ function frameCancion(now,dt){
   if(S.playing&&S.kind!=='warm'&&S.a!=null&&S.b!=null&&t>=S.b){ seek(S.a); t=S.a; }
   if(t<S.lastT-.35) S.trail=S.trail.filter(p=>p.t<t);
   S.lastT=t;
-  if(S.playing){
+  if(S.playing&&L.on&&S.kind==='yt'&&S.id===L.id) learnFrame(t);
+  else if(S.playing){
     S.trail.push({t,m:pitch.midi}); if(S.trail.length>5000) S.trail.splice(0,1500);
     if(S.guide){ const n=S.guide.find(n=>n.s<=t&&t<n.e); if(n){ S.tot+=dt; if(pitch.midi!=null&&Math.abs(rel(pitch.midi,n.m).d)<1) S.hit+=dt; } }
     if(pitch.midi!=null){ steadyWin.push(pitch.midi); if(steadyWin.length>8) steadyWin.shift(); S.voiced+=dt;
       if(steadyWin.length>=6&&Math.max(...steadyWin)-Math.min(...steadyWin)<0.4) S.steady+=dt; }
     else steadyWin.length=0;
   }
-  $('sScore').textContent=S.guide?(S.tot>1?Math.round(S.hit/S.tot*100)+'%':'–'):(S.voiced>2?Math.round(S.steady/S.voiced*100)+'%':'–');
+  $('sScore').textContent=L.on?((S.guide?S.guide.length:0)+' notas'):S.guide?(S.tot>1?Math.round(S.hit/S.tot*100)+'%':'–'):(S.voiced>2?Math.round(S.steady/S.voiced*100)+'%':'–');
   const dur=duration();
   $('sTime').textContent=fmt(t)+(S.kind!=='warm'&&isFinite(dur)&&dur>0?' / '+fmt(dur):'');
   if(view!=='cancion') return;

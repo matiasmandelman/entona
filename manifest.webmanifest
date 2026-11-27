@@ -1,7 +1,7 @@
 {
   "name": "Entona",
   "short_name": "Entona",
-  "description": "Practica afinación con el micrófono: afinador, imitar notas, rango y modo canción.",
+  "description": "Practica afinación con el micrófono: afinador, imitar notas, rango y canciones.",
   "start_url": "./",
   "scope": "./",
   "display": "standalone",
@@ -10,6 +10,9 @@
   "theme_color": "#16111f",
   "lang": "es",
   "icons": [
-    { "src": "icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any maskable" }
+    { "src": "icon-180.png", "sizes": "180x180", "type": "image/png" },
+    { "src": "icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" },
+    { "src": "icon.svg", "sizes": "any", "type": "image/svg+xml" }
   ]
 }
